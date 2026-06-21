@@ -4,7 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+hyper-util = { version = "0.1", features = ["tokio"] }
 hyper = { version = "1", features = ["http1", "client"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-std", "io-util"] }
+tokio-rustls = { version = "0.26", features = ["ring"] }
+webpki-roots = { version = "1" }
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "io-std",
+  "io-util",
+] }
 http-body-util = { version = "0.1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["tokio", "client"] }
