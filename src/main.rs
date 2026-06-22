@@ -1,3 +1,4 @@
+use clap::Parser;
 use http_body_util::{BodyExt, Empty};
 use hyper::{Request, body::Bytes};
 use hyper_util::rt::TokioIo;
@@ -8,13 +9,28 @@ use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
+use crate::cli::Args;
+
+mod cli;
+
 // Rust only allows one non-auto trait in a dyn object, so combine AsyncRead+AsyncWrite here
 trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncStream for T {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let url = "https://v2.jokeapi.dev/joke/Any".parse::<hyper::Uri>()?;
+    let mut args = Args::parse();
+    if args.threads.is_none() {
+        if let Ok(num) = std::thread::available_parallelism() {
+            args.threads = Some(num.get() as u16);
+        } else {
+            panic!(
+                "number of threads not selected and unable to get the number of threads available"
+            );
+        }
+    }
+
+    let url = args.url.parse::<hyper::Uri>()?;
 
     let scheme = url.scheme_str().unwrap_or("http");
     let host = url.host().expect("uri has no host");
