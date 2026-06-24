@@ -11,6 +11,7 @@ use tokio_rustls::{
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncStream for T {}
 
+#[derive(Debug, Clone)]
 pub struct Conn {
     pub url: hyper::Uri,
     pub host: String,

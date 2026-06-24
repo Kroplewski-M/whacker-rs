@@ -1,5 +1,6 @@
 use clap::Parser;
 use http_body_util::{BodyExt, Empty};
+use hyper::client::conn::http1::SendRequest;
 use hyper::{Request, body::Bytes};
 use hyper_util::rt::TokioIo;
 use tokio::io::AsyncWriteExt;
@@ -24,18 +25,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let url = args.url.parse::<hyper::Uri>()?;
 
-    let connection = Conn::new(url);
-    let io = connection.connect().await?;
+    let mut handles = Vec::new();
 
-    let (mut sender, conn) =
-        hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(io)).await?;
+    for _ in 0..args.threads.unwrap() {
+        let connection = Conn::new(url.clone());
+        let io = connection.connect().await?;
 
-    tokio::task::spawn(async move {
-        if let Err(err) = conn.await {
-            println!("Connection failed: {:?}", err);
-        }
-    });
+        let (mut sender, conn) =
+            hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(io)).await?;
 
+        tokio::task::spawn(async move {
+            if let Err(err) = conn.await {
+                println!("Connection failed: {:?}", err);
+            }
+        });
+
+        handles.push(tokio::task::spawn(async move {
+            send_request(connection, &mut sender).await
+        }));
+    }
+    for h in handles {
+        h.await??;
+    }
+    Ok(())
+}
+
+async fn send_request(
+    connection: Conn,
+    sender: &mut SendRequest<Empty<Bytes>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let authority = &connection.url.authority().unwrap().clone();
 
     let req = Request::builder()
