@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use clap::Parser;
 use http_body_util::{BodyExt, Empty};
 use hyper::client::conn::http1::SendRequest;
@@ -11,8 +13,7 @@ use crate::connection::Conn;
 mod cli;
 mod connection;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut args = Args::parse();
     if args.threads.is_none() {
         if let Ok(num) = std::thread::available_parallelism() {
@@ -23,14 +24,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             );
         }
     }
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(args.threads.unwrap() as usize)
+        .enable_all()
+        .build()?
+        .block_on(run(args))
+}
+async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url = args.url.parse::<hyper::Uri>()?;
-
+    let deadline = Instant::now() + Duration::from_secs(args.seconds as u64);
     let mut handles = Vec::new();
 
-    for _ in 0..args.threads.unwrap() {
+    for _ in 0..args.connections {
         let connection = Conn::new(url.clone());
         let io = connection.connect().await?;
-
         let (mut sender, conn) =
             hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(io)).await?;
 
@@ -41,9 +48,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         });
 
         handles.push(tokio::task::spawn(async move {
-            send_request(connection, &mut sender).await
+            while Instant::now() < deadline {
+                send_request(&connection, &mut sender).await?;
+            }
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         }));
     }
+
     for h in handles {
         h.await??;
     }
@@ -51,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn send_request(
-    connection: Conn,
+    connection: &Conn,
     sender: &mut SendRequest<Empty<Bytes>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let authority = &connection.url.authority().unwrap().clone();
