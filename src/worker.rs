@@ -1,0 +1,39 @@
+use http_body_util::Empty;
+use hyper_util::rt::TokioIo;
+use std::time::{Duration, Instant};
+
+use crate::cli::Args;
+use crate::connection::Conn;
+use crate::request;
+
+pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let url = args.url.parse::<hyper::Uri>()?;
+    let deadline = Instant::now() + Duration::from_secs(args.seconds as u64);
+    let mut handles = Vec::new();
+
+    for _ in 0..args.connections {
+        let connection = Conn::new(url.clone());
+        let io = connection.connect().await?;
+        let (mut sender, conn) =
+            hyper::client::conn::http1::handshake::<_, Empty<hyper::body::Bytes>>(TokioIo::new(io))
+                .await?;
+
+        tokio::task::spawn(async move {
+            if let Err(err) = conn.await {
+                println!("Connection failed: {:?}", err);
+            }
+        });
+
+        handles.push(tokio::task::spawn(async move {
+            while Instant::now() < deadline {
+                request::send_request(&connection, &mut sender).await?;
+            }
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        }));
+    }
+
+    for h in handles {
+        h.await??;
+    }
+    Ok(())
+}
