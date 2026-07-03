@@ -3,21 +3,19 @@ use hyper::client::conn::http1::SendRequest;
 use hyper::{Request, body::Bytes};
 use tokio::io::AsyncWriteExt;
 
-use crate::connection::Conn;
-
 pub async fn send_request(
-    connection: &Conn,
+    url: &hyper::Uri,
     sender: &mut SendRequest<Empty<Bytes>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let authority = &connection.url.authority().unwrap().clone();
+    let authority = url.authority().unwrap().clone();
 
     let req = Request::builder()
-        .uri(&connection.url)
+        .uri(url)
         .header(hyper::header::HOST, authority.as_str())
         .body(Empty::<Bytes>::new())?;
 
     let mut res = sender.send_request(req).await?;
-    println!("Response status: {}", res.status());
+    eprintln!("Response status: {}", res.status());
 
     while let Some(next) = res.frame().await {
         let frame = next?;

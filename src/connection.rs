@@ -18,32 +18,30 @@ pub struct Conn {
     pub tls_config: Option<Arc<ClientConfig>>,
 }
 impl Conn {
-    pub fn new(url: hyper::Uri) -> Self {
-        let scheme = url.scheme_str().unwrap_or("http").to_owned();
+    pub fn new(url: hyper::Uri, tls_config: Option<Arc<ClientConfig>>) -> Self {
         let host = url.host().expect("uri has no host").to_owned();
-
-        let mut config: Option<ClientConfig> = None;
-        if scheme == "https" {
-            let mut root_store = RootCertStore::empty();
-            root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-            config = Some(
-                ClientConfig::builder_with_provider(Arc::new(
-                    tokio_rustls::rustls::crypto::ring::default_provider(),
-                ))
-                .with_safe_default_protocol_versions()
-                .unwrap()
-                .with_root_certificates(root_store)
-                .with_no_client_auth(),
-            );
-        }
-        let tls_config = config.map(Arc::new);
-
         Self {
             url,
             host,
             tls_config,
         }
+    }
+    pub fn build_tls_config(scheme: impl Into<String> + PartialEq) -> Option<Arc<ClientConfig>> {
+        let scheme = scheme.into();
+        if scheme != "https" {
+            return None;
+        }
+        let mut root_store = RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let config = ClientConfig::builder_with_provider(Arc::new(
+            tokio_rustls::rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+        Some(Arc::new(config))
     }
     pub async fn connect(
         &self,
