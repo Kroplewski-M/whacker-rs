@@ -69,3 +69,121 @@ impl Conn {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[test]
+    fn build_tls_config_http() {
+        let config = Conn::build_tls_config("http");
+        assert!(config.is_none());
+    }
+    #[test]
+    fn build_tls_config_none() {
+        let config = Conn::build_tls_config("");
+        assert!(config.is_none());
+    }
+    #[test]
+    fn build_tls_config_random() {
+        let config = Conn::build_tls_config("random");
+        assert!(config.is_none());
+    }
+    #[test]
+    fn build_tls_config_https() {
+        let config = Conn::build_tls_config("https");
+        assert!(config.is_some());
+    }
+    #[test]
+    fn build_tls_config_uppercase_https_is_not_matched() {
+        // Documents current case-sensitive behavior: scheme_str() from hyper::Uri is
+        // preserved as-written, so an uppercase scheme falls through to plaintext.
+        let config = Conn::build_tls_config("HTTPS");
+        assert!(config.is_none());
+    }
+
+    #[test]
+    fn new_extracts_host_without_port() {
+        let uri: hyper::Uri = "http://example.com:8080/path".parse().unwrap();
+        let conn = Conn::new(uri, None);
+        assert_eq!(conn.host, "example.com");
+    }
+
+    #[test]
+    fn new_stores_tls_config() {
+        let uri: hyper::Uri = "https://example.com".parse().unwrap();
+        let tls_config = Conn::build_tls_config("https");
+        let conn = Conn::new(uri, tls_config.clone());
+        assert!(conn.tls_config.is_some());
+
+        let uri: hyper::Uri = "http://example.com".parse().unwrap();
+        let conn = Conn::new(uri, None);
+        assert!(conn.tls_config.is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "uri has no host")]
+    fn new_panics_when_uri_has_no_host() {
+        let uri: hyper::Uri = "/path".parse().unwrap();
+        Conn::new(uri, None);
+    }
+
+    #[tokio::test]
+    async fn connect_plaintext_reads_and_writes() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 5];
+            socket.read_exact(&mut buf).await.unwrap();
+            socket.write_all(b"world").await.unwrap();
+        });
+
+        let uri: hyper::Uri = format!("http://{}", addr).parse().unwrap();
+        let conn = Conn::new(uri, None);
+        let mut stream = conn.connect().await.unwrap();
+
+        stream.write_all(b"hello").await.unwrap();
+        let mut buf = [0u8; 5];
+        stream.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"world");
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connect_tls_fails_against_non_tls_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let _ = listener.accept().await.unwrap();
+        });
+
+        let uri: hyper::Uri = format!("https://localhost:{}", addr.port())
+            .parse()
+            .unwrap();
+        let tls_config = Conn::build_tls_config("https");
+        let conn = Conn::new(uri, tls_config);
+
+        let result = conn.connect().await;
+        assert!(result.is_err());
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connect_fails_when_connection_refused() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener); // free the port so nothing is listening on it
+
+        let uri: hyper::Uri = format!("http://{}", addr).parse().unwrap();
+        let conn = Conn::new(uri, None);
+
+        assert!(conn.connect().await.is_err());
+    }
+}
