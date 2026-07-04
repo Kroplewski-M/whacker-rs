@@ -13,16 +13,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncStream for T {}
 
 #[derive(Debug, Clone)]
 pub struct Conn {
-    pub url: hyper::Uri,
     pub host: String,
+    pub port: u16,
     pub tls_config: Option<Arc<ClientConfig>>,
 }
 impl Conn {
-    pub fn new(url: hyper::Uri, tls_config: Option<Arc<ClientConfig>>) -> Self {
+    pub fn new(url: &hyper::Uri, tls_config: Option<Arc<ClientConfig>>) -> Self {
         let host = url.host().expect("uri has no host").to_owned();
+        let port = url
+            .port_u16()
+            .unwrap_or(if tls_config.is_some() { 443 } else { 80 });
         Self {
-            url,
             host,
+            port,
             tls_config,
         }
     }
@@ -48,12 +51,7 @@ impl Conn {
     ) -> Result<Box<dyn AsyncStream>, Box<dyn std::error::Error + Send + Sync>> {
         // Open raw TCP connection
 
-        let port = self
-            .url
-            .port_u16()
-            .unwrap_or(if self.tls_config.is_some() { 443 } else { 80 });
-
-        let address = format!("{}:{}", self.host, port);
+        let address = format!("{}:{}", self.host, self.port);
 
         let stream = TcpStream::connect(address).await?;
 
@@ -107,7 +105,7 @@ mod tests {
     #[test]
     fn new_extracts_host_without_port() {
         let uri: hyper::Uri = "http://example.com:8080/path".parse().unwrap();
-        let conn = Conn::new(uri, None);
+        let conn = Conn::new(&uri, None);
         assert_eq!(conn.host, "example.com");
     }
 
@@ -115,11 +113,11 @@ mod tests {
     fn new_stores_tls_config() {
         let uri: hyper::Uri = "https://example.com".parse().unwrap();
         let tls_config = Conn::build_tls_config("https");
-        let conn = Conn::new(uri, tls_config.clone());
+        let conn = Conn::new(&uri, tls_config.clone());
         assert!(conn.tls_config.is_some());
 
         let uri: hyper::Uri = "http://example.com".parse().unwrap();
-        let conn = Conn::new(uri, None);
+        let conn = Conn::new(&uri, None);
         assert!(conn.tls_config.is_none());
     }
 
@@ -127,7 +125,7 @@ mod tests {
     #[should_panic(expected = "uri has no host")]
     fn new_panics_when_uri_has_no_host() {
         let uri: hyper::Uri = "/path".parse().unwrap();
-        Conn::new(uri, None);
+        Conn::new(&uri, None);
     }
 
     #[tokio::test]
@@ -143,7 +141,7 @@ mod tests {
         });
 
         let uri: hyper::Uri = format!("http://{}", addr).parse().unwrap();
-        let conn = Conn::new(uri, None);
+        let conn = Conn::new(&uri, None);
         let mut stream = conn.connect().await.unwrap();
 
         stream.write_all(b"hello").await.unwrap();
@@ -167,7 +165,7 @@ mod tests {
             .parse()
             .unwrap();
         let tls_config = Conn::build_tls_config("https");
-        let conn = Conn::new(uri, tls_config);
+        let conn = Conn::new(&uri, tls_config);
 
         let result = conn.connect().await;
         assert!(result.is_err());
@@ -182,7 +180,7 @@ mod tests {
         drop(listener); // free the port so nothing is listening on it
 
         let uri: hyper::Uri = format!("http://{}", addr).parse().unwrap();
-        let conn = Conn::new(uri, None);
+        let conn = Conn::new(&uri, None);
 
         assert!(conn.connect().await.is_err());
     }

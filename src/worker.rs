@@ -13,7 +13,7 @@ pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sy
     let tls_config = Conn::build_tls_config(scheme);
 
     for _ in 0..args.connections {
-        let connection = Conn::new(args.url.clone(), tls_config.clone());
+        let connection = Conn::new(&args.url, tls_config.clone());
         let io = connection.connect().await?;
         let (mut sender, conn) =
             hyper::client::conn::http1::handshake::<_, Empty<hyper::body::Bytes>>(TokioIo::new(io))
@@ -25,9 +25,10 @@ pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sy
             }
         });
 
+        let url = args.url.clone();
         handles.push(tokio::task::spawn(async move {
             while Instant::now() < deadline {
-                request::send_request(&connection.url, &mut sender).await?;
+                request::send_request(&url, &mut sender).await?;
             }
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
         }));
