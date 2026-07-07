@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::cli::Args;
 use crate::connection::Conn;
+use crate::metrics::RequestMetric;
 use crate::request;
 
 pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -27,15 +28,20 @@ pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sy
 
         let url = args.url.clone();
         handles.push(tokio::task::spawn(async move {
+            let mut metrics: Vec<RequestMetric> = vec![];
             while Instant::now() < deadline {
-                request::send_request(&url, &mut sender).await?;
+                let metric = request::send_request(&url, &mut sender).await;
+                metrics.push(metric);
             }
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+            Ok::<Vec<RequestMetric>, Box<dyn std::error::Error + Send + Sync>>(metrics)
         }));
     }
 
+    let mut metrics: Vec<RequestMetric> = vec![];
     for h in handles {
-        h.await??;
+        let res = h.await??;
+        metrics.extend(res);
     }
+
     Ok(())
 }

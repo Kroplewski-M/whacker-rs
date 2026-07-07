@@ -3,6 +3,7 @@ use clap::Parser;
 
 mod cli;
 mod connection;
+mod metrics;
 mod request;
 mod worker;
 
