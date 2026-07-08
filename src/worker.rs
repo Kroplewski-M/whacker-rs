@@ -4,14 +4,22 @@ use std::time::{Duration, Instant};
 
 use crate::cli::Args;
 use crate::connection::Conn;
-use crate::metrics::RequestMetric;
+use crate::metrics::{self, RequestMetric};
 use crate::request;
 
 pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let deadline = Instant::now() + Duration::from_secs(args.seconds as u64);
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(args.seconds as u64);
     let mut handles = Vec::new();
     let scheme = args.url.scheme_str().unwrap_or("http");
     let tls_config = Conn::build_tls_config(scheme);
+
+    println!("running {}s test @ {}", args.seconds, args.url);
+    println!(
+        "{} threads and {} connections per thread",
+        args.threads.unwrap(),
+        args.connections
+    );
 
     for _ in 0..args.connections {
         let connection = Conn::new(&args.url, tls_config.clone());
@@ -37,11 +45,11 @@ pub async fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sy
         }));
     }
 
-    let mut metrics: Vec<RequestMetric> = vec![];
+    let mut request_metrics: Vec<RequestMetric> = vec![];
     for h in handles {
         let res = h.await??;
-        metrics.extend(res);
+        request_metrics.extend(res);
     }
-
+    metrics::log_metrics(request_metrics, start.elapsed());
     Ok(())
 }

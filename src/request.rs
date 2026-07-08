@@ -32,13 +32,10 @@ pub async fn send_request(
         Ok(())
     }
     .await;
-    let metric = RequestMetric {
+    RequestMetric {
         status_code,
         bytes_received,
         duration: start.elapsed(),
         error: outcome.err().map(|e| e.to_string()),
-    };
-
-    println!("{:?}", metric);
-    metric
+    }
 }
